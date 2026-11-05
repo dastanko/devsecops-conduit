@@ -18,3 +18,5 @@ Dockerfile
 pyproject.toml
 setup.cfg
 tests
+
+.venv
