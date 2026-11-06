@@ -17,6 +17,7 @@ stable version all year. Slides and reading: <https://devsecops-fieldbook.vercel
 | 06 | [Continuous delivery: a robot releases every green commit](lessons/06.md) |
 | 07 | [Docker: build the application once, run the same box everywhere](lessons/07.md) |
 | 08 | [Compose: the whole application in one file, released by the robot](lessons/08.md) |
+| Midterm | [Test (Option A)](lessons/midterm/test.pdf) · [Ship a change (Option B)](lessons/midterm/extra-lab.md) |
 
 ## Sources
 
