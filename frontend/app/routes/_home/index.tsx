@@ -3,13 +3,15 @@ import { Suspense } from "react";
 
 import { useUser } from "~/hooks/useUser";
 import { Tabs } from "~/components/Tabs";
-import fetchClient from "~/libs/api";
+import { apiClientContext } from "~/context/apiClient";
 import Tags from "~/components/Tags";
 import type { Route } from "./+types";
 import TagLoading from "./TagLoading";
+import { throwApiError } from "~/libs/api/errors";
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const res = await fetchClient.GET("/tags");
+export async function loader({ request, context }: Route.LoaderArgs) {
+  const res = await context.get(apiClientContext).GET("/tags");
+  if (res.error) throwApiError(res.error);
 
   return {
     tags: res.data?.tags || [],
@@ -39,8 +41,10 @@ export default function Home() {
     <div className="home-page">
       <div className="banner">
         <div className="container">
-          <h1 className="logo-font">conduit</h1>
-          <p>A place to share your knowledge.</p>
+          <span className="hero-brand">conduit</span>
+          <p className="eyebrow">Oyatillo Sidikov</p>
+          <h1>Oyatillo Sidikov</h1>
+          <p>Read thoughtful stories, learn from others, and share what you know.</p>
         </div>
       </div>
 
@@ -60,7 +64,7 @@ export default function Home() {
                 {(tags) => {
                   return (
                     <div className="sidebar">
-                      <p>Popular Tags</p>
+                      <p>Explore topics</p>
                       <Tags link={pathname === "/"} tags={tags} />
                     </div>
                   );

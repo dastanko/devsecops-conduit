@@ -7,8 +7,11 @@ import { inputsSchema, type Inputs } from "~/libs/schemas/settings";
 import type { components } from "~/consts/schema";
 import { destroySession, getSession } from "~/session.server";
 import { ErrorMessage } from "~/components/ErrorMessage";
-import fetchClient from "~/libs/api";
 import { userContext } from "~/context/user";
+import { apiClientContext } from "~/context/apiClient";
+import { getApiErrorMessages } from "~/libs/api/errors";
+import { PasswordInput } from "~/components/PasswordInput";
+import { SuccessMessage } from "~/components/SuccessMessage";
 
 export const loader = ({ context }: Route.LoaderArgs) => {
   const user = context.get(userContext);
@@ -16,7 +19,7 @@ export const loader = ({ context }: Route.LoaderArgs) => {
   return { user };
 };
 
-export async function action({ request }: Route.ActionArgs) {
+export async function action({ request, context }: Route.ActionArgs) {
   let formData = await request.formData();
   const data = Object.fromEntries(formData);
   const { intent, ...updateData } = data;
@@ -41,28 +44,36 @@ export async function action({ request }: Route.ActionArgs) {
         };
       }
 
-      const res = await fetchClient.PUT("/user", {
-        body: {
-          user: omitBy(result.data, (value, key) => {
-            if (key === "password" && !value) {
-              return true;
-            }
-            return false;
-          }) as components["schemas"]["User"],
-        },
-      });
+      try {
+        const res = await context.get(apiClientContext).PUT("/user", {
+          body: {
+            user: omitBy(result.data, (value, key) => {
+              if (key === "password" && !value) {
+                return true;
+              }
+              return false;
+            }) as components["schemas"]["User"],
+          },
+        });
 
-      if (res.error) {
+        if (res.error) {
+          return {
+            errors: getApiErrorMessages(res.error),
+            formState: updateData,
+          };
+        }
+
         return {
-          errors: res.error.errors.body,
+          formState: updateData,
+          errors: [],
+          success: "settings-saved",
+        };
+      } catch (error) {
+        return {
+          errors: getApiErrorMessages(error),
           formState: updateData,
         };
       }
-
-      return {
-        formState: updateData,
-        errors: [],
-      };
     }
     default: {
       throw Error("unknown intent" + intent);
@@ -83,65 +94,127 @@ export default () => {
         <div className="row">
           <div className="col-md-6 offset-md-3 col-xs-12">
             <h1 className="text-xs-center">Your Settings</h1>
+            <p className="settings-intro">
+              Keep your public profile and sign-in details up to date.
+            </p>
 
             <ErrorMessage errors={errors} />
+            <SuccessMessage
+              message={
+                fetcher.state === "idle" && fetcher.data?.success
+                  ? "Settings saved."
+                  : undefined
+              }
+            />
 
             <fetcher.Form method="post">
               <fieldset>
                 <fieldset className="form-group">
+                  <label className="sr-only" htmlFor="settings-image">
+                    Profile image URL
+                  </label>
                   <input
+                    id="settings-image"
                     className="form-control"
                     type="text"
                     placeholder="URL of profile picture"
                     name="image"
-                    defaultValue={formState?.image || user?.image}
+                    autoComplete="url"
+                    defaultValue={formState?.image ?? user?.image}
                   />
                 </fieldset>
-                <ErrorMessage errors={fieldErrors?.email} />
+                <ErrorMessage errors={fieldErrors?.image} />
 
                 <fieldset className="form-group">
+                  <label className="sr-only" htmlFor="settings-username">
+                    Username
+                  </label>
                   <input
+                    id="settings-username"
                     className="form-control form-control-lg"
                     type="text"
                     placeholder="Your Name"
                     name="username"
-                    defaultValue={formState?.username || user?.username}
+                    autoComplete="username"
+                    required
+                    aria-invalid={Boolean(fieldErrors?.username?.length)}
+                    aria-describedby={
+                      fieldErrors?.username?.length
+                        ? "settings-username-error"
+                        : undefined
+                    }
+                    defaultValue={formState?.username ?? user?.username}
                   />
                 </fieldset>
-                <ErrorMessage errors={fieldErrors?.username} />
+                <ErrorMessage
+                  id="settings-username-error"
+                  errors={fieldErrors?.username}
+                />
 
                 <fieldset className="form-group">
+                  <label className="sr-only" htmlFor="settings-bio">
+                    Short bio
+                  </label>
                   <textarea
+                    id="settings-bio"
                     className="form-control form-control-lg"
                     rows={8}
                     placeholder="Short bio about you"
                     name="bio"
-                    defaultValue={formState?.bio || user?.bio}
+                    defaultValue={formState?.bio ?? user?.bio}
                   ></textarea>
                 </fieldset>
                 <ErrorMessage errors={fieldErrors?.bio} />
 
                 <fieldset className="form-group">
+                  <label className="sr-only" htmlFor="settings-email">
+                    Email address
+                  </label>
                   <input
+                    id="settings-email"
                     className="form-control form-control-lg"
-                    type="text"
+                    type="email"
                     placeholder="Email"
                     name="email"
-                    defaultValue={formState?.email || user?.email}
+                    autoComplete="email"
+                    required
+                    aria-invalid={Boolean(fieldErrors?.email?.length)}
+                    aria-describedby={
+                      fieldErrors?.email?.length
+                        ? "settings-email-error"
+                        : undefined
+                    }
+                    defaultValue={formState?.email ?? user?.email}
                   />
                 </fieldset>
-                <ErrorMessage errors={fieldErrors?.email} />
+                <ErrorMessage
+                  id="settings-email-error"
+                  errors={fieldErrors?.email}
+                />
 
                 <fieldset className="form-group">
-                  <input
+                  <label className="sr-only" htmlFor="settings-password">
+                    New password
+                  </label>
+                  <PasswordInput
+                    id="settings-password"
                     className="form-control form-control-lg"
-                    type="password"
                     placeholder="New Password"
                     name="password"
+                    autoComplete="new-password"
+                    aria-invalid={Boolean(fieldErrors?.password?.length)}
+                    aria-describedby={
+                      fieldErrors?.password?.length
+                        ? "settings-password-error"
+                        : undefined
+                    }
                     defaultValue={formState?.password || ""}
                   />
                 </fieldset>
-                <ErrorMessage errors={fieldErrors?.password} />
+                <ErrorMessage
+                  id="settings-password-error"
+                  errors={fieldErrors?.password}
+                />
 
                 <button
                   disabled={isLoading}
@@ -149,6 +222,7 @@ export default () => {
                   name="intent"
                   value="update"
                   className="btn btn-lg btn-primary pull-xs-right"
+                  aria-busy={isLoading}
                 >
                   Update Settings
                 </button>
@@ -163,7 +237,7 @@ export default () => {
                 className="btn btn-outline-danger"
                 disabled={isLoading}
               >
-                Or click here to logout.
+                Sign out
               </button>
             </fetcher.Form>
           </div>

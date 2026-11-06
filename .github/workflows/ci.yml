@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-tests.txt
+      - run: python -m pytest tests/unit -v
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --log-opts=HEAD --no-banner -v
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run openapi
+      - run: git diff --exit-code -- app/consts/schema.d.ts
+      - run: npm run typecheck
+      - run: npm run test:api-client
+      - run: npm run build
+        env:
+          REACT_PUBLIC_API_ENDPOINT: http://127.0.0.1:8000/api
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: conduit
+          POSTGRES_PASSWORD: conduit-ci-only
+          POSTGRES_DB: conduit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U conduit -d conduit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: prod
+      SECRET_KEY: ci-only-not-a-secret
+      JWT_SECRET_KEY: ci-only-jwt-not-a-secret
+      POSTGRES_USER: conduit
+      POSTGRES_PASSWORD: conduit-ci-only
+      POSTGRES_DB: conduit
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: 5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements.txt -r requirements-tests.txt
+      - run: python -m alembic -c alembic.ini upgrade head
+        working-directory: backend
+      - run: uvicorn conduit.app:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+        working-directory: backend
+      - run: timeout 30 bash -c 'until curl -fs http://127.0.0.1:8000/api/health-check; do sleep 1; done'
+      - run: python -m pytest tests/integration -v
+      - if: failure()
+        run: cat backend/api.log
+
+  build-images:
+    needs: [unit-tests, secret-scan, integration-tests, frontend-checks]
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/oyatillo-dev/conduit-api:latest
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          build-args: REACT_PUBLIC_API_ENDPOINT=http://127.0.0.1:8000/api
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ghcr.io/oyatillo-dev/conduit-web:latest
+
+  deploy:
+    needs: [unit-tests, secret-scan]
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: |
+          python -m pip install ansible-core
+          ansible-galaxy collection install community.postgresql
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Deploy application
+        run: |
+          ansible-playbook \
+            -i deploy/inventory.ini \
+            deploy/playbook.yml \
+            --private-key ~/.ssh/deploy_key \
+            -e "revision=$GITHUB_SHA"

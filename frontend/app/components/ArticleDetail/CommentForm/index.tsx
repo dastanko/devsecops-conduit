@@ -1,9 +1,11 @@
 import { ErrorMessage } from "~/components/ErrorMessage";
 import { LoadingButton } from "~/components/LoadingButton";
 import { Avatar } from "~/components/Avatar";
+import { useEffect } from "react";
 import { useParams } from "react-router";
 import { useUser } from "~/hooks/useUser";
 import { useFetcher } from "~/hooks/useFetcher";
+import { SuccessMessage } from "~/components/SuccessMessage";
 
 export const CommentForm = () => {
   const { fetcher, errors, fieldErrors, formRef, isLoading, formState } =
@@ -12,9 +14,22 @@ export const CommentForm = () => {
   const { slug } = useParams<{ slug: string }>();
   const user = useUser();
 
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.errors?.length === 0) {
+      formRef.current?.reset();
+    }
+  }, [fetcher.state, fetcher.data, formRef]);
+
   return (
     <>
       <ErrorMessage errors={errors} />
+      <SuccessMessage
+        message={
+          fetcher.state === "idle" && fetcher.data?.success === "comment-added"
+            ? "Comment posted."
+            : undefined
+        }
+      />
 
       <fetcher.Form
         className="card comment-form"
@@ -34,11 +49,14 @@ export const CommentForm = () => {
               encType: "application/json",
             }
           );
-          formRef.current?.reset();
         }}
       >
         <div className="card-block">
+          <label className="sr-only" htmlFor="comment-body">
+            Write a comment
+          </label>
           <textarea
+            id="comment-body"
             name="body"
             className="form-control"
             placeholder="Write a comment..."
